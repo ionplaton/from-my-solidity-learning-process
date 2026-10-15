@@ -1,0 +1,22 @@
+name: Belot web (Telegram Mini App)
+
+on:
+  push:
+    paths:
+      - "belot-web/**"
+      - ".github/workflows/belot-web.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: belot-web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm test

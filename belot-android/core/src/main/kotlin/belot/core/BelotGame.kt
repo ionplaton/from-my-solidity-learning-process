@@ -39,6 +39,8 @@ class BelotGame(
     val rules: Rules = Rules(players = names.size),
     private val random: Random = Random.Default,
     firstDealer: Int = random.nextInt(names.size),
+    /** Returns the deck order for a new deal (the deal takes cards from the end). Tests can fix it. */
+    private val shuffler: ((List<Card>) -> List<Card>)? = null,
 ) {
     val playerCount = names.size
 
@@ -128,7 +130,7 @@ class BelotGame(
         handNumber++
         phase = Phase.BIDDING
         hands.forEach { it.clear() }
-        stock = deck.shuffled(random).toMutableList()
+        stock = (shuffler?.invoke(deck) ?: deck.shuffled(random)).toMutableList()
         for (i in 0 until playerCount) take(firstDeal, hands[(dealer + 1 + i) % playerCount])
         turnedCard = stock.removeAt(stock.lastIndex)
         bidRound = 1

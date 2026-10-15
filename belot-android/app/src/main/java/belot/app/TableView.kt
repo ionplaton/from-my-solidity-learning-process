@@ -116,7 +116,7 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
             else -> {
                 val showingLast = g.trick.isEmpty() && g.lastTrick.isNotEmpty()
                 val plays = if (showingLast) g.lastTrick else g.trick
-                for (p in plays) drawTrickCard(canvas, p, (p.player - me + n) % n, n, cx, cy, if (showingLast) 150 else 255)
+                for (p in plays) drawTrickCard(canvas, p, (p.player - me + n) % n, n, cx, cy, dim = showingLast)
                 if (showingLast && g.lastTrickWinner >= 0) {
                     text.textSize = sp(13f)
                     text.textAlign = Paint.Align.CENTER
@@ -294,7 +294,7 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
     }
 
     /** [rel] is the player's position relative to the viewer: 0 = me, 1 = next player (to the right), ... */
-    private fun drawTrickCard(canvas: Canvas, p: Play, rel: Int, n: Int, cx: Float, cy: Float, alpha: Int) {
+    private fun drawTrickCard(canvas: Canvas, p: Play, rel: Int, n: Int, cx: Float, cy: Float, dim: Boolean) {
         val th = tw * CardPainter.ASPECT
         val (dx, dy) = when (n) {
             2 -> if (rel == 0) 0f to th * 0.28f else 0f to -th * 0.28f
@@ -304,14 +304,14 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
                 else -> -tw * 0.62f to -th * 0.16f
             }
             else -> when (rel) {
-                0 -> 0f to th * 0.3f
-                1 -> tw * 0.72f to 0f
-                2 -> 0f to -th * 0.3f
-                else -> -tw * 0.72f to 0f
+                0 -> 0f to th * 0.36f
+                1 -> tw * 0.95f to 0f
+                2 -> 0f to -th * 0.36f
+                else -> -tw * 0.95f to 0f
             }
         }
         tmp.set(cx + dx - tw / 2, cy + dy - th / 2, cx + dx + tw / 2, cy + dy + th / 2)
-        CardPainter.drawFace(canvas, p.card, tmp, alpha = alpha)
+        CardPainter.drawFace(canvas, p.card, tmp, dim = dim)
     }
 
     private fun drawHand(canvas: Canvas, g: PlayerView, W: Float, H: Float) {

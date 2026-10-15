@@ -1,0 +1,17 @@
+{
+  "name": "belot-web",
+  "version": "1.0.0",
+  "description": "Belot for 2-4 players: web / Telegram Mini App with a small Node.js game server",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "ws": "8.18.0"
+  }
+}

@@ -24,4 +24,10 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // `-PfixtureOut=<file>` writes reference games used to cross-check the JavaScript engine (belot-web).
+    providers.gradleProperty("fixtureOut").orNull?.let {
+        systemProperty("fixture.out", it)
+        providers.gradleProperty("fixtureGames").orNull?.let { n -> systemProperty("fixture.games", n) }
+        outputs.upToDateWhen { false }
+    }
 }
