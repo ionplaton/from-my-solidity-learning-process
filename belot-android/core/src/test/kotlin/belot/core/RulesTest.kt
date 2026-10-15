@@ -15,6 +15,8 @@ class RulesTest {
             assertEquals(152, Card.deck24().sumOf { it.points(trump) })
         }
         assertEquals(24, Card.deck24().toSet().size)
+        for (trump in Suit.entries) assertEquals(152, Card.deck32().sumOf { it.points(trump) })
+        assertEquals(32, Card.deck32().toSet().size)
     }
 
     @Test
@@ -129,11 +131,16 @@ class RulesTest {
 
     @Test
     fun fullGamesWithBotsKeepInvariants() {
+        for (n in 2..4) playBotGames(n)
+    }
+
+    private fun playBotGames(n: Int) {
         var handsPlayed = 0
         var failedContracts = 0
         repeat(150) { seed ->
-            val rules = if (seed % 2 == 0) Rules() else Rules(target = 301, takerMustBeatEach = false, mustUnderTrump = false)
-            val g = BelotGame(listOf("A", "B", "C"), rules, Random(seed))
+            val rules = if (seed % 2 == 0) Rules(players = n)
+            else Rules(players = n, target = 301, takerMustBeatEach = false, mustUnderTrump = false)
+            val g = BelotGame(listOf("A", "B", "C", "D").take(n), rules, Random(seed))
             var guard = 0
             while (g.phase != Phase.GAME_OVER) {
                 check(guard++ < 10_000)
@@ -168,15 +175,22 @@ class RulesTest {
 
     private fun checkResult(g: BelotGame) {
         val r = g.lastResult!!
+        val ts = g.sideOf(r.taker)
         assertEquals(162, r.cardPoints.sum() + r.lastTrick.sum())
-        assertEquals(r.raw.sum(), r.awarded.sum())
         assertEquals(r.raw.sum(), 162 + r.comboPoints.sum() + r.belote.sum() + r.capot.sum())
         assertTrue(g.hands.all { it.isEmpty() })
-        val opp = (0..2).filter { it != r.taker }
-        if (g.rules.takerMustBeatEach) {
-            assertEquals(opp.all { r.raw[r.taker] > r.raw[it] }, r.takerMade)
+        val opp = (0 until g.sideCount).filter { it != ts }
+        val litige = !r.takerMade && g.sideCount == 2 && r.raw[0] == r.raw[1]
+        if (litige) {
+            assertEquals(r.raw.sum() - (r.raw[ts] - r.belote[ts]), r.awarded.sum())
+        } else {
+            assertEquals(r.raw.sum(), r.awarded.sum())
         }
-        if (!r.takerMade) assertEquals(r.belote[r.taker], r.awarded[r.taker])
+        if (g.sideCount == 2 || g.rules.takerMustBeatEach) {
+            assertEquals(opp.all { r.raw[ts] > r.raw[it] }, r.takerMade)
+        }
+        if (!r.takerMade) assertEquals(r.belote[ts], r.awarded[ts])
+        if (r.capot.sum() > 0) assertEquals(g.tricksPerHand, (0 until g.playerCount).filter { g.sideOf(it) == r.capot.indexOf(90) }.sumOf { g.tricksWon[it] })
     }
 
     @Test
@@ -189,7 +203,8 @@ class RulesTest {
             // Other players' cards are never leaked.
             assertEquals(g.hands[seat].toSet(), v.hand.toSet())
         }
-        assertEquals(Rules(301, false, false), Codec.decodeRules(Codec.encodeRules(Rules(301, false, false))))
+        val r = Rules(players = 4, target = 301, takerMustBeatEach = false, mustUnderTrump = false)
+        assertEquals(r, Codec.decodeRules(Codec.encodeRules(r)))
     }
 
     @Test
@@ -210,5 +225,65 @@ class RulesTest {
             assertTrue(g.hands[g.taker].contains(turned))
             assertEquals(24, g.hands.flatten().toSet().size)
         }
+    }
+
+    @Test
+    fun dealSizesForTwoAndFourPlayers() {
+        for ((n, size) in listOf(2 to 12, 4 to 8)) {
+            repeat(30) { seed ->
+                val g = BelotGame(listOf("A", "B", "C", "D").take(n), Rules(players = n), Random(seed))
+                assertTrue(g.hands.all { it.size == if (n == 2) 6 else 5 })
+                g.bid(g.currentPlayer, true)
+                assertTrue(g.hands.all { it.size == size })
+                assertEquals(if (n == 4) 32 else 24, g.hands.flatten().toSet().size)
+                assertEquals(size, g.tricksPerHand)
+            }
+        }
+    }
+
+    @Test
+    fun fourPlayersNeedNotTrumpWhenPartnerWins() {
+        var checked = 0
+        repeat(400) { seed ->
+            val g = BelotGame(listOf("A", "B", "C", "D"), Rules(players = 4), Random(seed))
+            g.bid(g.currentPlayer, true)
+            val tr = g.trump!!
+            while (g.phase == Phase.PLAYING) {
+                val p = g.currentPlayer
+                val hand = g.hands[p]
+                val legal = g.legalCards(p)
+                if (g.trick.isNotEmpty()) {
+                    val led = g.trick[0].card.suit
+                    val partnerWins = g.trick[g.trickWinnerIndex()].player == g.partnerOf(p)
+                    if (hand.none { it.suit == led }) {
+                        if (partnerWins) {
+                            assertEquals(hand.toSet(), legal.toSet())
+                            if (hand.any { it.suit == tr } && hand.any { it.suit != tr }) checked++
+                        } else if (hand.any { it.suit == tr }) {
+                            assertTrue(legal.all { it.suit == tr })
+                        }
+                    }
+                }
+                g.play(p, legal.random(Random(seed + checked)))
+            }
+        }
+        assertTrue(checked > 0)
+    }
+
+    @Test
+    fun teamCombosAndSevens() {
+        // Sevens/eights carrés do not count; 7-8-9 is a tierce.
+        assertTrue(Combos.find(listOf("7S", "7H", "7C", "7D").map(::c)).isEmpty())
+        assertEquals(20, Combos.find(listOf("7S", "8S", "9S").map(::c)).single().points)
+        // Team play: partner's quarte beats an opponent's tierce, and the partner's own tierce then counts too.
+        val p0 = Combos.find(listOf("9H", "TH", "JH").map(::c))
+        val p1 = Combos.find(listOf("QS", "KS", "AS").map(::c))
+        val p2 = Combos.find(listOf("7D", "8D", "9D", "TD").map(::c))
+        val w = Combos.winners(listOf(p0, p1, p2, emptyList()), Suit.CLUBS) { it % 2 }
+        assertEquals(setOf(0, 2), w.map { it.first }.toSet())
+        // Same best sequence in both teams: nobody scores.
+        val a = Combos.find(listOf("9H", "TH", "JH").map(::c))
+        val b = Combos.find(listOf("9S", "TS", "JS").map(::c))
+        assertTrue(Combos.winners(listOf(a, b, emptyList(), emptyList()), Suit.CLUBS) { it % 2 }.isEmpty())
     }
 }

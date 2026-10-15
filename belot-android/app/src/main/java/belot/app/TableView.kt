@@ -72,14 +72,18 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
         val st = state ?: return
         val g = st.game ?: return
         val me = g.seat
-        val right = (me + 1) % 3
-        val left = (me + 2) % 3
+        val n = g.playerCount
 
         drawTopBar(canvas, st, g, W)
 
+        // Opponents along the top, in table order (the next player sits to the right).
         val oppY = topBar + 14 * density
-        drawOpponent(canvas, st, g, left, W * 0.25f, oppY)
-        drawOpponent(canvas, st, g, right, W * 0.75f, oppY)
+        val columnWidth = W / (n - 1)
+        for (r in n - 1 downTo 1) {
+            val seat = (me + r) % n
+            val column = n - 1 - r
+            drawOpponent(canvas, st, g, seat, columnWidth * (column + 0.5f), oppY, columnWidth)
+        }
 
         // Recent events.
         val oppBottom = oppY + sp(14f) + 30 * density + sw * CardPainter.ASPECT + sp(32f) + 18 * density
@@ -112,7 +116,7 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
             else -> {
                 val showingLast = g.trick.isEmpty() && g.lastTrick.isNotEmpty()
                 val plays = if (showingLast) g.lastTrick else g.trick
-                for (p in plays) drawTrickCard(canvas, p, me, right, cx, cy, if (showingLast) 150 else 255)
+                for (p in plays) drawTrickCard(canvas, p, (p.player - me + n) % n, n, cx, cy, if (showingLast) 150 else 255)
                 if (showingLast && g.lastTrickWinner >= 0) {
                     text.textSize = sp(13f)
                     text.textAlign = Paint.Align.CENTER
@@ -140,7 +144,7 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
         }
         text.textSize = sp(13f)
         text.textAlign = Paint.Align.CENTER
-        canvas.drawText((listOf(scoreLine(g, me, "Вы")) + badges(g, me)).joinToString(" · "), cx, infoY + 4 * density, text)
+        canvas.drawText(ellipsize((listOf(myScoreLine(g)) + badges(g, me)).joinToString(" · "), text, W - 16 * density), cx, infoY + 4 * density, text)
 
         drawHand(canvas, g, W, H)
     }
@@ -159,14 +163,28 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
         }
     }
 
-    private fun scoreLine(g: PlayerView, seat: Int, name: String): String {
-        val parts = mutableListOf("$name: ${g.totals[seat]}")
+    private fun myScoreLine(g: PlayerView): String {
+        val mySide = g.sideOf(g.seat)
+        val parts = if (g.teams) {
+            mutableListOf("Мы: ${g.totals[mySide]}", "Они: ${g.totals[1 - mySide]}")
+        } else {
+            mutableListOf("Вы: ${g.totals[mySide]}")
+        }
+        if (g.phase != Phase.BIDDING) parts += "взяток ${g.tricksWon[g.seat]}"
+        return parts.joinToString(" · ")
+    }
+
+    /** Line under an opponent: their score (team score is shown in the player's own line) and tricks. */
+    private fun opponentScoreLine(g: PlayerView, seat: Int): String {
+        val parts = mutableListOf<String>()
+        if (!g.teams) parts += "очки: ${g.totals[g.sideOf(seat)]}"
         if (g.phase != Phase.BIDDING) parts += "взяток ${g.tricksWon[seat]}"
         return parts.joinToString(" · ")
     }
 
     private fun badges(g: PlayerView, seat: Int): List<String> {
         val parts = mutableListOf<String>()
+        if (g.teams && seat != g.seat && g.sideOf(seat) == g.sideOf(g.seat)) parts += "партнёр"
         if (g.dealer == seat) parts += "сдаёт"
         if (g.taker == seat) parts += "играет"
         if (g.beloteHolder == seat) parts += "бела"
@@ -214,10 +232,11 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
         }
     }
 
-    private fun drawOpponent(canvas: Canvas, st: TableState, g: PlayerView, seat: Int, x: Float, y: Float) {
+    private fun drawOpponent(canvas: Canvas, st: TableState, g: PlayerView, seat: Int, x: Float, y: Float, columnWidth: Float) {
         val info = st.players.getOrNull(seat)
         val active = g.currentPlayer == seat
-        val name = ellipsize(st.name(seat), bold.apply { textSize = sp(14f) }, width * 0.42f)
+        val maxText = columnWidth - 8 * density
+        val name = ellipsize(st.name(seat), bold.apply { textSize = sp(14f) }, maxText - 24 * density)
 
         // Name pill.
         val pillW = bold.measureText(name) + 24 * density
@@ -240,8 +259,9 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
 
         // Card backs.
         val n = g.handCounts[seat]
+        val partner = g.teams && g.sideOf(seat) == g.sideOf(g.seat)
         val sh = sw * CardPainter.ASPECT
-        val step = sw * 0.32f
+        val step = min(sw * 0.32f, (maxText - sw) / (n - 1).coerceAtLeast(1))
         val total = sw + step * (n - 1).coerceAtLeast(0)
         val top = y + pillH + 16 * density
         for (i in 0 until n) {
@@ -264,21 +284,31 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
 
         text.textSize = sp(12f)
         text.textAlign = Paint.Align.CENTER
-        canvas.drawText(ellipsize(scoreLine(g, seat, "очки"), text, width * 0.48f), x, top + sh + sp(16f), text)
+        canvas.drawText(ellipsize(opponentScoreLine(g, seat), text, maxText), x, top + sh + sp(16f), text)
         val b = badges(g, seat)
         if (b.isNotEmpty()) {
-            text.color = 0xFFF2B705.toInt()
-            canvas.drawText(ellipsize(b.joinToString(" · "), text, width * 0.48f), x, top + sh + sp(32f), text)
+            text.color = if (partner) 0xFF90CAF9.toInt() else 0xFFF2B705.toInt()
+            canvas.drawText(ellipsize(b.joinToString(" · "), text, maxText), x, top + sh + sp(32f), text)
             text.color = 0xFFFFFFFF.toInt()
         }
     }
 
-    private fun drawTrickCard(canvas: Canvas, p: Play, me: Int, right: Int, cx: Float, cy: Float, alpha: Int) {
+    /** [rel] is the player's position relative to the viewer: 0 = me, 1 = next player (to the right), ... */
+    private fun drawTrickCard(canvas: Canvas, p: Play, rel: Int, n: Int, cx: Float, cy: Float, alpha: Int) {
         val th = tw * CardPainter.ASPECT
-        val (dx, dy) = when (p.player) {
-            me -> 0f to th * 0.28f
-            right -> tw * 0.62f to -th * 0.16f
-            else -> -tw * 0.62f to -th * 0.16f
+        val (dx, dy) = when (n) {
+            2 -> if (rel == 0) 0f to th * 0.28f else 0f to -th * 0.28f
+            3 -> when (rel) {
+                0 -> 0f to th * 0.28f
+                1 -> tw * 0.62f to -th * 0.16f
+                else -> -tw * 0.62f to -th * 0.16f
+            }
+            else -> when (rel) {
+                0 -> 0f to th * 0.3f
+                1 -> tw * 0.72f to 0f
+                2 -> 0f to -th * 0.3f
+                else -> -tw * 0.72f to 0f
+            }
         }
         tmp.set(cx + dx - tw / 2, cy + dy - th / 2, cx + dx + tw / 2, cy + dy + th / 2)
         CardPainter.drawFace(canvas, p.card, tmp, alpha = alpha)
@@ -288,9 +318,10 @@ class TableView(context: Context, private val onPlay: (Card) -> Unit, private va
         handRects.clear()
         val cards = g.hand
         if (cards.isEmpty()) return
+        val n = cards.size
+        val cw = if (n > 8) min(this.cw, W / 4.4f) else this.cw
         val ch = cw * CardPainter.ASPECT
         val margin = 10 * density
-        val n = cards.size
         val step = if (n > 1) min(cw * 0.95f, (W - 2 * margin - cw) / (n - 1)) else 0f
         val total = cw + step * (n - 1)
         val startX = (W - total) / 2

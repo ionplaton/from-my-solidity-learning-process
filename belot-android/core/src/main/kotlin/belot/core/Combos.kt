@@ -41,6 +41,7 @@ object Combos {
         val result = mutableListOf<Combo>()
         val used = mutableSetOf<Card>()
         for (rank in Rank.entries) {
+            if (rank < Rank.NINE) continue // carrés of sevens and eights do not count
             val four = hand.filter { it.rank == rank }
             if (four.size == 4) {
                 result += Combo(ComboKind.CARRE, four, carrePoints(rank))
@@ -71,12 +72,13 @@ object Combos {
     private val keyComparator = compareBy<Triple<Int, Int, Int>>({ it.first }, { it.second }, { it.third })
 
     /**
-     * Decides which players score their combinations. Sequences and carrés are compared separately:
-     * only the holder of the best sequence scores all of their sequences, only the holder of the best carré
-     * scores all of their carrés. Equal best sequences (same length and top card, neither in trump) cancel out.
-     * Returns a set of (player, combo) pairs that count.
+     * Decides which combinations count. Sequences and carrés are compared separately: only the side
+     * (a player, or a team of two in the four-player game) holding the best sequence scores all of its
+     * sequences, and only the side holding the best carré scores all of its carrés. Equal best sequences
+     * (same length and top card, none in trump) held by different sides cancel out.
+     * Returns the set of (player, combo) pairs that count.
      */
-    fun winners(combos: List<List<Combo>>, trump: Suit): Set<Pair<Int, Combo>> {
+    fun winners(combos: List<List<Combo>>, trump: Suit, sideOf: (Int) -> Int = { it }): Set<Pair<Int, Combo>> {
         val counted = mutableSetOf<Pair<Int, Combo>>()
 
         val bestSeq = combos.mapIndexed { p, list ->
@@ -84,10 +86,12 @@ object Combos {
         }.filter { it.second != null }
         if (bestSeq.isNotEmpty()) {
             val top = bestSeq.maxOfWith(keyComparator) { it.second!! }
-            val holders = bestSeq.filter { keyComparator.compare(it.second, top) == 0 }
-            if (holders.size == 1) {
-                val p = holders[0].first
-                combos[p].filter { it.kind == ComboKind.SEQUENCE }.forEach { counted += p to it }
+            val sides = bestSeq.filter { keyComparator.compare(it.second, top) == 0 }.map { sideOf(it.first) }.toSet()
+            if (sides.size == 1) {
+                val side = sides.first()
+                combos.forEachIndexed { p, list ->
+                    if (sideOf(p) == side) list.filter { it.kind == ComboKind.SEQUENCE }.forEach { counted += p to it }
+                }
             }
         }
 
@@ -95,8 +99,10 @@ object Combos {
             p to list.filter { it.kind == ComboKind.CARRE }.maxOfOrNull { carreStrength(it.top) }
         }.filter { it.second != null }
         if (bestCarre.isNotEmpty()) {
-            val p = bestCarre.maxBy { it.second!! }.first
-            combos[p].filter { it.kind == ComboKind.CARRE }.forEach { counted += p to it }
+            val side = sideOf(bestCarre.maxBy { it.second!! }.first)
+            combos.forEachIndexed { p, list ->
+                if (sideOf(p) == side) list.filter { it.kind == ComboKind.CARRE }.forEach { counted += p to it }
+            }
         }
         return counted
     }

@@ -22,11 +22,13 @@ object Codec {
     }
 
     fun encodeRules(r: Rules): JSONObject = JSONObject()
+        .put("players", r.players)
         .put("target", r.target)
         .put("beatEach", r.takerMustBeatEach)
         .put("underTrump", r.mustUnderTrump)
 
     fun decodeRules(o: JSONObject): Rules = Rules(
+        players = o.optInt("players", 3).coerceIn(2, 4),
         target = o.optInt("target", 501),
         takerMustBeatEach = o.optBoolean("beatEach", true),
         mustUnderTrump = o.optBoolean("underTrump", true),
@@ -64,6 +66,7 @@ object Codec {
     fun encodeView(v: PlayerView): JSONObject {
         val o = JSONObject()
             .put("seat", v.seat)
+            .put("n", v.playerCount)
             .put("phase", v.phase.name)
             .put("hand_no", v.handNumber)
             .put("dealer", v.dealer)
@@ -96,6 +99,7 @@ object Codec {
 
     fun decodeView(o: JSONObject): PlayerView = PlayerView(
         seat = o.getInt("seat"),
+        playerCount = o.getInt("n"),
         phase = Phase.valueOf(o.getString("phase")),
         handNumber = o.getInt("hand_no"),
         dealer = o.getInt("dealer"),

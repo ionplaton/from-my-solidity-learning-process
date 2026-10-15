@@ -65,7 +65,7 @@ class NetworkTest {
         Thread.sleep(200)
         assertTrue(guest.errors.isNotEmpty())
 
-        host.client.send(JSONObject().put("t", "rules").put("rules", Codec.encodeRules(Rules(target = 301))))
+        host.client.send(JSONObject().put("t", "rules").put("rules", Codec.encodeRules(Rules(players = 3, target = 301))))
         host.client.send(JSONObject().put("t", "addbot"))
         host.client.send(JSONObject().put("t", "start"))
 
@@ -139,5 +139,56 @@ class NetworkTest {
         server.stop()
         if (ok) assertEquals(server.port, info.get().port)
         else println("UDP broadcast not available in this environment; skipped")
+    }
+
+    @Test
+    fun fourPlayerTableWithSwapAndBots() {
+        val server = GameServer("t", preferredPort = 47460, botDelayMs = 2)
+        server.start()
+        val done = CountDownLatch(2)
+        val host = AutoPlayer("Host", server.port, "t", done)
+        host.client.connect()
+        Thread.sleep(200)
+        val guest = AutoPlayer("Guest", server.port, null, done)
+        guest.client.connect()
+        Thread.sleep(200)
+        host.client.send(JSONObject().put("t", "rules").put("rules", Codec.encodeRules(Rules(players = 4, target = 301))))
+        // Make the guest the host's partner (seat 2).
+        host.client.send(JSONObject().put("t", "swap").put("a", 1).put("b", 2))
+        Thread.sleep(200)
+        assertEquals(2, guest.last.get().getInt("you"))
+        assertEquals(4, guest.last.get().getJSONArray("players").length())
+        repeat(2) { host.client.send(JSONObject().put("t", "addbot")) }
+        host.client.send(JSONObject().put("t", "start"))
+        assertTrue(done.await(60, TimeUnit.SECONDS), "game did not finish")
+        val v = Codec.decodeView(guest.last.get().getJSONObject("game"))
+        assertEquals(4, v.playerCount)
+        assertEquals(2, v.totals.size)
+        assertTrue(v.totals.max() >= 301)
+
+        // Shrinking the table with humans on the extra seats is refused in a new lobby; covered by rules check.
+        host.client.close()
+        guest.client.close()
+        server.stop()
+    }
+
+    @Test
+    fun twoPlayerGame() {
+        val server = GameServer("t", preferredPort = 47480, botDelayMs = 2)
+        server.start()
+        val done = CountDownLatch(1)
+        val host = AutoPlayer("Host", server.port, "t", done)
+        host.client.connect()
+        Thread.sleep(200)
+        host.client.send(JSONObject().put("t", "rules").put("rules", Codec.encodeRules(Rules(players = 2, target = 301))))
+        host.client.send(JSONObject().put("t", "addbot"))
+        host.client.send(JSONObject().put("t", "addbot"))
+        Thread.sleep(200)
+        assertTrue(host.errors.isNotEmpty(), "third seat must not exist")
+        host.client.send(JSONObject().put("t", "start"))
+        assertTrue(done.await(60, TimeUnit.SECONDS), "game did not finish")
+        assertEquals(2, Codec.decodeView(host.last.get().getJSONObject("game")).playerCount)
+        host.client.close()
+        server.stop()
     }
 }

@@ -139,25 +139,31 @@ class GameScreen(context: Context, private val onMenu: () -> Unit, private val o
         if (!show) return
         val r = g.result!!
         val ctx = context
-        val over = g.phase == Phase.GAME_OVER
 
+        val over = g.phase == Phase.GAME_OVER
+        val mySide = g.sideOf(g.seat)
+        val winnerText = when {
+            !over -> ""
+            g.winner == mySide -> if (g.teams) "Ваша команда победила!" else "Вы победили!"
+            else -> "Победа: ${sideName(st, g, g.winner)}"
+        }
         resultPanel.add(ctx.label(
-            if (over) "Игра окончена! Победитель: ${st.name(g.winner)}" else "Раздача №${g.handNumber} окончена",
+            if (over) "Игра окончена. $winnerText" else "Раздача №${g.handNumber} окончена",
             20f, bold = true, color = if (over) Colors.GOLD else Colors.TEXT,
         ), top = 0)
         resultPanel.add(ctx.label("Козырь: ${r.trump.title}, играл(а) ${st.name(r.taker)}", 15f, color = Colors.TEXT_DIM), top = 4)
 
-        for (p in 0 until 3) {
-            val parts = mutableListOf("карты ${r.cardPoints[p]}")
-            if (r.comboPoints[p] > 0) parts += "комбинации ${r.comboPoints[p]}"
-            if (r.belote[p] > 0) parts += "бела ${r.belote[p]}"
-            if (r.lastTrick[p] > 0) parts += "последняя ${r.lastTrick[p]}"
-            if (r.capot[p] > 0) parts += "все взятки ${r.capot[p]}"
-            val tag = if (p == r.taker) " (играл(а))" else ""
-            val name = if (p == g.seat) "Вы" else st.name(p)
+        val takerSide = g.sideOf(r.taker)
+        for (side in 0 until g.sideCount) {
+            val parts = mutableListOf("карты ${r.cardPoints[side]}")
+            if (r.comboPoints[side] > 0) parts += "комбинации ${r.comboPoints[side]}"
+            if (r.belote[side] > 0) parts += "бела ${r.belote[side]}"
+            if (r.lastTrick[side] > 0) parts += "последняя ${r.lastTrick[side]}"
+            if (r.capot[side] > 0) parts += "все взятки ${r.capot[side]}"
+            val tag = if (side == takerSide) " (играл${if (g.teams) "и" else "(а)"})" else ""
             val block = ctx.column(0)
-            block.add(ctx.label("$name$tag: +${r.awarded[p]}", 17f, bold = true), top = 0)
-            block.add(ctx.label("${parts.joinToString(" + ")} = ${r.raw[p]}", 14f, color = Colors.TEXT_DIM), top = 2)
+            block.add(ctx.label("${sideName(st, g, side)}$tag: +${r.awarded[side]}", 17f, bold = true), top = 0)
+            block.add(ctx.label("${parts.joinToString(" + ")} = ${r.raw[side]}", 14f, color = Colors.TEXT_DIM), top = 2)
             resultPanel.add(block, top = 12)
         }
 
@@ -168,20 +174,21 @@ class GameScreen(context: Context, private val onMenu: () -> Unit, private val o
             }, 14f, color = Colors.TEXT_DIM), top = 10)
         }
 
-        val takerName = st.name(r.taker)
-        val verdict = if (r.takerMade) {
-            "$takerName выполнил(а) игру — каждый получает свои очки."
-        } else if (g.rules.takerMustBeatEach) {
-            "$takerName не набрал(а) больше каждого соперника — его очки (кроме белы) делятся между соперниками."
-        } else {
-            "$takerName не набрал(а) больше половины очков — его очки (кроме белы) делятся между соперниками."
+        val takerName = sideName(st, g, takerSide)
+        val tie = !r.takerMade && g.sideCount == 2 && r.raw[0] == r.raw[1]
+        val verdict = when {
+            r.takerMade -> "$takerName — игра сыграна, каждый получает свои очки."
+            tie -> "$takerName — ничья по очкам (спорная игра): очки играющих сгорают, соперники получают свои."
+            g.sideCount == 2 -> "$takerName — не набрали больше соперника: все очки (кроме белы) уходят соперникам."
+            g.rules.takerMustBeatEach -> "$takerName — не набрал(а) больше каждого соперника: очки (кроме белы) делятся между соперниками."
+            else -> "$takerName — не набрал(а) больше половины очков: очки (кроме белы) делятся между соперниками."
         }
         resultPanel.add(ctx.label(verdict, 15f, color = if (r.takerMade) 0xFFA5D6A7.toInt() else 0xFFFFAB91.toInt()), top = 12)
 
         resultPanel.add(ctx.label("Общий счёт (до ${g.rules.target}):", 15f, bold = true), top = 14)
-        val order = (0 until 3).sortedByDescending { g.totals[it] }
-        for (p in order) {
-            resultPanel.add(ctx.label("${if (p == g.seat) "Вы" else st.name(p)} — ${g.totals[p]}", 16f), top = 2)
+        val order = (0 until g.sideCount).sortedByDescending { g.totals[it] }
+        for (side in order) {
+            resultPanel.add(ctx.label("${sideName(st, g, side)} — ${g.totals[side]}", 16f), top = 2)
         }
 
         if (over) {
@@ -194,7 +201,7 @@ class GameScreen(context: Context, private val onMenu: () -> Unit, private val o
         } else {
             val iAmReady = st.players.getOrNull(g.seat)?.ready == true
             if (iAmReady) {
-                val waiting = (0 until 3).filter { st.players[it]?.ready != true }.map { st.name(it) }
+                val waiting = st.players.indices.filter { st.players[it]?.ready != true }.map { st.name(it) }
                 resultPanel.add(ctx.label("Ждём: ${waiting.joinToString(", ")}", 15f, color = Colors.TEXT_DIM).apply {
                     gravity = Gravity.CENTER
                 }, top = 16)
@@ -205,7 +212,7 @@ class GameScreen(context: Context, private val onMenu: () -> Unit, private val o
     }
 
     private fun updateBanner(st: TableState, g: PlayerView) {
-        val offline = (0 until 3).filter { st.players.getOrNull(it)?.online == false }
+        val offline = st.players.indices.filter { st.players[it]?.online == false }
         val key = offline.joinToString() + "/" + st.isHost
         if (key == bannerKey) return
         bannerKey = key
@@ -225,4 +232,9 @@ class GameScreen(context: Context, private val onMenu: () -> Unit, private val o
             }
         }
     }
+
+    /** "Вы", a player's name, or a team ("Вы и Петя" / "Ион и Вася"). */
+    private fun sideName(st: TableState, g: PlayerView, side: Int): String =
+        g.sideMembers(side).sortedBy { if (it == g.seat) -1 else it }
+            .joinToString(" и ") { if (it == g.seat) "Вы" else st.name(it) }
 }

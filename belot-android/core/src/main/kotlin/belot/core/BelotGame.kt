@@ -8,6 +8,7 @@ data class Play(val player: Int, val card: Card)
 
 data class Declaration(val player: Int, val combo: Combo, val counted: Boolean)
 
+/** Result of one deal. All lists are indexed by side (see [BelotGame.sideOf]). */
 data class HandResult(
     val trump: Suit,
     val taker: Int,
@@ -22,26 +23,43 @@ data class HandResult(
 )
 
 /**
- * Belot for three players, every player for themselves.
+ * Belot for two, three or four players.
  *
- * 24 cards (9..A). Each player gets 5 cards, the next card is turned up and proposed as trump.
- * Round 1: in turn, each player may take the turned suit or pass. Round 2: each player may name another
- * suit or pass. If everyone passes twice, the next dealer redeals. The taker receives the turned card plus 2,
- * the others 3 cards each, so everybody holds 8 cards.
+ * - 4 players: two teams (partners sit opposite each other: seats 0+2 and 1+3), 32 cards (7..A), 8 cards each.
+ * - 3 players: everyone for themselves, 24 cards (9..A), 8 cards each.
+ * - 2 players: one against one, 24 cards (9..A), 12 cards each.
+ *
+ * The first part of the deal (5 cards each, 6 with two players) is followed by turning up the next card,
+ * whose suit is proposed as trump. Round 1: in turn, each player may take the turned suit or pass.
+ * Round 2: each player may name another suit or pass. If everyone passes twice, the next dealer redeals.
+ * The taker receives the turned card and the rest of the deal is completed.
  */
 class BelotGame(
     names: List<String>,
-    val rules: Rules = Rules(),
+    val rules: Rules = Rules(players = names.size),
     private val random: Random = Random.Default,
-    firstDealer: Int = random.nextInt(PLAYERS),
+    firstDealer: Int = random.nextInt(names.size),
 ) {
-    companion object {
-        const val PLAYERS = 3
-        const val TRICKS = 8
+    val playerCount = names.size
+
+    init {
+        require(playerCount in 2..4) { "Нужно от 2 до 4 игроков" }
     }
 
+    /** Scoring sides: two teams with four players, otherwise every player is a side. */
+    val sideCount = if (playerCount == 4) 2 else playerCount
+    fun sideOf(player: Int) = if (playerCount == 4) player % 2 else player
+    fun partnerOf(player: Int) = if (playerCount == 4) (player + 2) % 4 else -1
+
+    private val deck = Card.deck(playerCount)
+    val deckCards: List<Card> get() = deck
+    val tricksPerHand = deck.size / playerCount
+    private val firstDeal = if (playerCount == 2) 6 else 5
+    private val takerExtra = if (playerCount == 2) 5 else 2
+    private val othersExtra = if (playerCount == 2) 6 else 3
+
     val names: MutableList<String> = names.toMutableList()
-    val totals = IntArray(PLAYERS)
+    val totals = IntArray(sideCount)
 
     var phase = Phase.BIDDING
         private set
@@ -52,14 +70,14 @@ class BelotGame(
     var currentPlayer = 0
         private set
 
-    val hands: List<MutableList<Card>> = List(PLAYERS) { mutableListOf() }
+    val hands: List<MutableList<Card>> = List(playerCount) { mutableListOf() }
     private var stock = mutableListOf<Card>()
 
     var turnedCard: Card? = null
         private set
     var bidRound = 1
         private set
-    val passed = BooleanArray(PLAYERS)
+    val passed = BooleanArray(playerCount)
     private var passesInRound = 0
 
     var trump: Suit? = null
@@ -74,8 +92,8 @@ class BelotGame(
         private set
     var tricksPlayed = 0
         private set
-    val tricksWon = IntArray(PLAYERS)
-    private val cardPoints = IntArray(PLAYERS)
+    val tricksWon = IntArray(playerCount)
+    private val cardPoints = IntArray(playerCount)
     val playedCards = mutableSetOf<Card>()
 
     var declarations: List<Declaration> = emptyList()
@@ -86,6 +104,7 @@ class BelotGame(
 
     var lastResult: HandResult? = null
         private set
+    /** Winning side, or -1. */
     var winner = -1
         private set
 
@@ -96,22 +115,21 @@ class BelotGame(
         deal()
     }
 
-    private fun next(p: Int) = (p + 1) % PLAYERS
+    private fun next(p: Int) = (p + 1) % playerCount
 
     private fun log(s: String) {
         logLines.addLast(s)
-        while (logLines.size > 8) logLines.removeFirst()
+        while (logLines.size > 10) logLines.removeFirst()
     }
+
+    private fun take(n: Int, to: MutableList<Card>) = repeat(n) { to += stock.removeAt(stock.lastIndex) }
 
     private fun deal() {
         handNumber++
         phase = Phase.BIDDING
         hands.forEach { it.clear() }
-        stock = Card.deck24().shuffled(random).toMutableList()
-        for (i in 0 until PLAYERS) {
-            val p = (dealer + 1 + i) % PLAYERS
-            repeat(5) { hands[p] += stock.removeAt(stock.lastIndex) }
-        }
+        stock = deck.shuffled(random).toMutableList()
+        for (i in 0 until playerCount) take(firstDeal, hands[(dealer + 1 + i) % playerCount])
         turnedCard = stock.removeAt(stock.lastIndex)
         bidRound = 1
         passesInRound = 0
@@ -150,7 +168,7 @@ class BelotGame(
         passed[player] = true
         passesInRound++
         log("${names[player]}: пас")
-        if (passesInRound < PLAYERS) {
+        if (passesInRound < playerCount) {
             currentPlayer = next(player)
         } else if (bidRound == 1) {
             bidRound = 2
@@ -168,14 +186,14 @@ class BelotGame(
         trump = chosen
         taker = player
         hands[player] += turnedCard!!
-        repeat(2) { hands[player] += stock.removeAt(stock.lastIndex) }
-        for (p in 0 until PLAYERS) if (p != player) repeat(3) { hands[p] += stock.removeAt(stock.lastIndex) }
+        take(takerExtra, hands[player])
+        for (i in 1 until playerCount) take(othersExtra, hands[(player + i) % playerCount])
         check(stock.isEmpty())
 
         val combos = hands.map { Combos.find(it) }
-        val counted = Combos.winners(combos, chosen)
+        val counted = Combos.winners(combos, chosen, ::sideOf)
         declarations = combos.flatMapIndexed { p, list -> list.map { Declaration(p, it, (p to it) in counted) } }
-        beloteHolder = (0 until PLAYERS).firstOrNull { p ->
+        beloteHolder = (0 until playerCount).firstOrNull { p ->
             hands[p].contains(Card(chosen, Rank.KING)) && hands[p].contains(Card(chosen, Rank.QUEEN))
         } ?: -1
 
@@ -193,12 +211,16 @@ class BelotGame(
 
         val follow = hand.filter { it.suit == led }
         if (follow.isNotEmpty()) {
+            // When trump is led, a higher trump must be played if possible (even over the partner).
             if (led == tr && topTrump != null) {
                 val higher = follow.filter { it.rank.trumpOrder > topTrump }
                 return higher.ifEmpty { follow }
             }
             return follow
         }
+        // Cannot follow suit. With four players there is no obligation to trump while the partner wins the trick.
+        val partnerWinning = playerCount == 4 && trick[trickWinnerIndex()].player == partnerOf(player)
+        if (partnerWinning) return hand.toList()
         val trumps = hand.filter { it.suit == tr }
         if (trumps.isNotEmpty()) {
             if (topTrump == null) return trumps
@@ -240,13 +262,12 @@ class BelotGame(
             log("${names[player]}: ${if (beloteCardsPlayed == 1) "Бела!" else "Ребела!"}")
         }
 
-        if (trick.size < PLAYERS) {
+        if (trick.size < playerCount) {
             currentPlayer = next(player)
             return
         }
 
-        val winnerPlay = trick[trickWinnerIndex()]
-        val w = winnerPlay.player
+        val w = trick[trickWinnerIndex()].player
         cardPoints[w] += trick.sumOf { it.card.points(trump) }
         tricksWon[w]++
         tricksPlayed++
@@ -261,44 +282,55 @@ class BelotGame(
             }
         }
 
-        if (tricksPlayed == TRICKS) endHand(w) else currentPlayer = w
+        if (tricksPlayed == tricksPerHand) endHand(w) else currentPlayer = w
     }
 
     private fun endHand(lastWinner: Int) {
         val tr = trump!!
-        val combo = IntArray(PLAYERS)
-        for (d in declarations) if (d.counted) combo[d.player] += d.combo.points
-        val belote = IntArray(PLAYERS)
-        if (beloteHolder >= 0) belote[beloteHolder] = Rules.BELOTE_POINTS
-        val last = IntArray(PLAYERS)
-        last[lastWinner] = Rules.LAST_TRICK_BONUS
-        val capot = IntArray(PLAYERS)
-        val capotPlayer = (0 until PLAYERS).firstOrNull { tricksWon[it] == TRICKS }
-        if (capotPlayer != null) capot[capotPlayer] = Rules.CAPOT_BONUS
+        val sides = sideCount
+        val cards = IntArray(sides)
+        for (p in 0 until playerCount) cards[sideOf(p)] += cardPoints[p]
+        val combo = IntArray(sides)
+        for (d in declarations) if (d.counted) combo[sideOf(d.player)] += d.combo.points
+        val belote = IntArray(sides)
+        if (beloteHolder >= 0) belote[sideOf(beloteHolder)] = Rules.BELOTE_POINTS
+        val last = IntArray(sides)
+        last[sideOf(lastWinner)] = Rules.LAST_TRICK_BONUS
+        val capot = IntArray(sides)
+        val sideTricks = IntArray(sides)
+        for (p in 0 until playerCount) sideTricks[sideOf(p)] += tricksWon[p]
+        (0 until sides).firstOrNull { sideTricks[it] == tricksPerHand }?.let { capot[it] = Rules.CAPOT_BONUS }
 
-        val raw = IntArray(PLAYERS) { cardPoints[it] + combo[it] + belote[it] + last[it] + capot[it] }
+        val raw = IntArray(sides) { cards[it] + combo[it] + belote[it] + last[it] + capot[it] }
         val total = raw.sum()
-        val opponents = (0 until PLAYERS).filter { it != taker }
-        val made = if (rules.takerMustBeatEach) {
-            opponents.all { raw[taker] > raw[it] }
+        val ts = sideOf(taker)
+        val opponents = (0 until sides).filter { it != ts }
+        val made = if (sides == 3 && !rules.takerMustBeatEach) {
+            raw[ts] * 2 > total
         } else {
-            raw[taker] * 2 > total
+            opponents.all { raw[ts] > raw[it] }
         }
 
         val awarded = raw.copyOf()
         if (!made) {
-            // The taker keeps only the belote; the rest of the taker's points is split between the opponents.
-            val rest = raw[taker] - belote[taker]
-            awarded[taker] = belote[taker]
-            awarded[opponents[0]] += rest - rest / 2
-            awarded[opponents[1]] += rest / 2
+            // The taking side keeps only its belote. The rest of its points goes to the opponents
+            // (split equally between two opponents in the three-player game). On an exact tie with
+            // one opponent side ("litige") the taker's points are simply lost.
+            val rest = raw[ts] - belote[ts]
+            awarded[ts] = belote[ts]
+            if (sides == 2) {
+                if (raw[ts] != raw[opponents[0]]) awarded[opponents[0]] += rest
+            } else {
+                awarded[opponents[0]] += rest - rest / 2
+                awarded[opponents[1]] += rest / 2
+            }
         }
-        for (p in 0 until PLAYERS) totals[p] += awarded[p]
+        for (s in 0 until sides) totals[s] += awarded[s]
 
         lastResult = HandResult(
             trump = tr,
             taker = taker,
-            cardPoints = cardPoints.toList(),
+            cardPoints = cards.toList(),
             comboPoints = combo.toList(),
             belote = belote.toList(),
             lastTrick = last.toList(),
@@ -310,15 +342,19 @@ class BelotGame(
         log(if (made) "${names[taker]} сыграл(а) свою игру" else "${names[taker]} не выполнил(а) игру")
 
         val best = totals.max()
-        val leaders = (0 until PLAYERS).filter { totals[it] == best }
+        val leaders = (0 until sides).filter { totals[it] == best }
         if (best >= rules.target && leaders.size == 1) {
             winner = leaders[0]
             phase = Phase.GAME_OVER
-            log("Победа: ${names[winner]}!")
+            log("Победа: ${sideName(winner)}!")
         } else {
             phase = Phase.HAND_OVER
         }
     }
+
+    fun sideMembers(side: Int): List<Int> = (0 until playerCount).filter { sideOf(it) == side }
+
+    fun sideName(side: Int): String = sideMembers(side).joinToString(" и ") { names[it] }
 
     fun nextHand() {
         check(phase == Phase.HAND_OVER) { "Раздача ещё не окончена" }
@@ -342,6 +378,7 @@ class BelotGame(
         val revealAll = tricksPlayed >= 1 || phase == Phase.HAND_OVER || phase == Phase.GAME_OVER
         return PlayerView(
             seat = seat,
+            playerCount = playerCount,
             phase = phase,
             handNumber = handNumber,
             dealer = dealer,
@@ -369,9 +406,10 @@ class BelotGame(
     }
 }
 
-/** Everything a single player is allowed to see. */
+/** Everything a single player is allowed to see. [totals], [winner] and [result] are per side. */
 data class PlayerView(
     val seat: Int,
+    val playerCount: Int,
     val phase: Phase,
     val handNumber: Int,
     val dealer: Int,
@@ -395,4 +433,9 @@ data class PlayerView(
     val winner: Int,
     val log: List<String>,
     val rules: Rules,
-)
+) {
+    val teams: Boolean get() = playerCount == 4
+    val sideCount: Int get() = if (teams) 2 else playerCount
+    fun sideOf(player: Int) = if (teams) player % 2 else player
+    fun sideMembers(side: Int): List<Int> = (0 until playerCount).filter { sideOf(it) == side }
+}

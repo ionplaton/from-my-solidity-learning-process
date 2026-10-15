@@ -12,25 +12,27 @@ enum class Suit(val code: Char, val symbol: String, val red: Boolean, val title:
 }
 
 /**
- * Ranks of the 24-card deck (9..A). Declaration order is the natural sequence order
- * used for tierce/quarte/quinte: 9, 10, J, Q, K, A.
+ * Card ranks. Declaration order is the natural sequence order used for tierce/quarte/quinte:
+ * 7, 8, 9, 10, J, Q, K, A. Sevens and eights are only used in the 32-card (four-player) deck.
  */
 enum class Rank(
     val code: Char,
     val label: String,
-    /** Strength in a non-trump suit: 9 < J < Q < K < 10 < A. */
+    /** Strength in a non-trump suit: 7 < 8 < 9 < J < Q < K < 10 < A. */
     val plainOrder: Int,
-    /** Strength in the trump suit: Q < K < 10 < A < 9 < J. */
+    /** Strength in the trump suit: 7 < 8 < Q < K < 10 < A < 9 < J. */
     val trumpOrder: Int,
     val plainPoints: Int,
     val trumpPoints: Int,
 ) {
-    NINE('9', "9", 0, 6, 0, 14),
-    TEN('T', "10", 4, 4, 10, 10),
-    JACK('J', "В", 1, 7, 2, 20),
-    QUEEN('Q', "Д", 2, 2, 3, 3),
-    KING('K', "К", 3, 3, 4, 4),
-    ACE('A', "Т", 5, 5, 11, 11);
+    SEVEN('7', "7", 0, 0, 0, 0),
+    EIGHT('8', "8", 1, 1, 0, 0),
+    NINE('9', "9", 2, 6, 0, 14),
+    TEN('T', "10", 6, 4, 10, 10),
+    JACK('J', "В", 3, 7, 2, 20),
+    QUEEN('Q', "Д", 4, 2, 3, 3),
+    KING('K', "К", 5, 3, 4, 4),
+    ACE('A', "Т", 7, 5, 11, 11);
 
     companion object {
         fun fromCode(c: Char): Rank = entries.first { it.code == c }
@@ -53,7 +55,14 @@ data class Card(val suit: Suit, val rank: Rank) {
             return Card(Suit.fromCode(code[1]), Rank.fromCode(code[0]))
         }
 
-        fun deck24(): List<Card> = Suit.entries.flatMap { s -> Rank.entries.map { r -> Card(s, r) } }
+        /** 32 cards (7..A) for four players, 24 cards (9..A) for two or three players. */
+        fun deck(players: Int): List<Card> {
+            val ranks = if (players == 4) Rank.entries else Rank.entries.filter { it >= Rank.NINE }
+            return Suit.entries.flatMap { s -> ranks.map { r -> Card(s, r) } }
+        }
+
+        fun deck24(): List<Card> = deck(3)
+        fun deck32(): List<Card> = deck(4)
     }
 }
 

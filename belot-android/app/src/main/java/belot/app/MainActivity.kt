@@ -101,7 +101,7 @@ class MainActivity : Activity(), Session.Listener {
     private fun showMenu() {
         val c = column(24).apply { gravity = Gravity.CENTER_HORIZONTAL }
         c.add(label("Белот", 44f, bold = true, color = Colors.GOLD).apply { gravity = Gravity.CENTER }, top = 24)
-        c.add(label("на троих · по Wi‑Fi", 18f, color = Colors.TEXT_DIM).apply { gravity = Gravity.CENTER }, top = 0)
+        c.add(label("вдвоём, втроём, вчетвером · по Wi‑Fi", 18f, color = Colors.TEXT_DIM).apply { gravity = Gravity.CENTER }, top = 0)
         c.add(label("Ваше имя", 15f, color = Colors.TEXT_DIM), top = 36)
         val name = input("Например, Ион", playerName)
         c.add(name, top = 6)
@@ -118,22 +118,28 @@ class MainActivity : Activity(), Session.Listener {
 
         c.add(button("Создать стол") {
             val n = takeName() ?: return@button
-            Session.host(n, withBots = false)
+            Session.host(n, botsGame = 0)
             showConnecting()
         }, top = 24)
         c.add(button("Присоединиться к столу") {
             takeName() ?: return@button
             showJoin()
         }, top = 12)
-        c.add(button("Играть с ботами", ButtonStyle.SECONDARY) {
-            val n = takeName() ?: return@button
-            Session.host(n, withBots = true)
-            showConnecting()
-        }, top = 12)
+        c.add(label("Тренировка с ботами:", 15f, color = Colors.TEXT_DIM), top = 20)
+        val botsRow = row()
+        for (count in Rules.PLAYER_COUNTS) {
+            botsRow.add(button(playersLabel(count), ButtonStyle.SECONDARY) {
+                val n = takeName() ?: return@button
+                Session.host(n, botsGame = count)
+                showConnecting()
+            }, top = 0, width = 0, weight = 1f)
+            if (count != Rules.PLAYER_COUNTS.last()) botsRow.addView(View(this), LinearLayout.LayoutParams(dp(8), 1))
+        }
+        c.add(botsRow, top = 6)
         c.add(button("Правила", ButtonStyle.SECONDARY) { showRules() }, top = 12)
         c.add(label(
-            "Как играть втроём: все телефоны подключаются к одной Wi‑Fi сети (или к точке доступа одного из телефонов). " +
-                "Один создаёт стол, двое других нажимают «Присоединиться».",
+            "Как играть: все телефоны подключаются к одной Wi‑Fi сети (или к точке доступа одного из телефонов). " +
+                "Один создаёт стол и выбирает, сколько игроков, остальные нажимают «Присоединиться».",
             14f, color = Colors.TEXT_DIM,
         ), top = 28)
         setScreen(Screen.MENU, c)
@@ -186,7 +192,7 @@ class MainActivity : Activity(), Session.Listener {
             return
         }
         for (h in found.values) {
-            val status = if (h.started) "игра идёт" else "игроков ${h.players}/3"
+            val status = if (h.started) "игра идёт" else "игроков ${h.players}/${h.tableSize}"
             list.add(button("Стол «${h.hostName}» — $status") { connectTo(h.address, h.port) }, top = 8)
         }
     }
@@ -237,10 +243,32 @@ class MainActivity : Activity(), Session.Listener {
             c.add(label("Ждём, пока создатель стола начнёт игру.", 14f, color = Colors.TEXT_DIM), top = 8)
         }
 
+        val rules = st.rules
+        c.add(label("Сколько игроков", 18f, bold = true), top = 20)
+        if (st.isHost) {
+            val counts = row()
+            for (n in Rules.PLAYER_COUNTS) {
+                counts.add(button(playersLabel(n), if (n == rules.players) ButtonStyle.PRIMARY else ButtonStyle.SECONDARY) {
+                    sendRules(rules.copy(players = n))
+                }, top = 0, width = 0, weight = 1f)
+                if (n != Rules.PLAYER_COUNTS.last()) counts.addView(View(this), LinearLayout.LayoutParams(dp(8), 1))
+            }
+            c.add(counts, top = 6)
+        }
+        c.add(label(tableDescription(rules.players), 14f, color = Colors.TEXT_DIM), top = 6)
+
         c.add(label("Игроки", 18f, bold = true), top = 20)
-        for (i in 0 until 3) {
-            val p = st.players.getOrNull(i)
+        if (rules.players == 4) {
+            c.add(label("Команды: места 1 и 3 (жёлтые) против мест 2 и 4 (голубые). Партнёры сидят напротив.", 14f, color = Colors.TEXT_DIM), top = 4)
+        }
+        for (i in st.players.indices) {
+            val p = st.players[i]
             val r = row()
+            val teamColor = when {
+                rules.players != 4 -> Colors.TEXT
+                i % 2 == 0 -> 0xFFFFE082.toInt()
+                else -> 0xFF90CAF9.toInt()
+            }
             val text = when {
                 p == null -> "${i + 1}. свободно"
                 else -> "${i + 1}. ${p.name}" + listOfNotNull(
@@ -250,21 +278,29 @@ class MainActivity : Activity(), Session.Listener {
                     if (!p.online) "нет связи" else null,
                 ).let { if (it.isEmpty()) "" else " (${it.joinToString(", ")})" }
             }
-            r.add(label(text, 17f, color = if (p == null) Colors.TEXT_DIM else Colors.TEXT), top = 0, width = 0, weight = 1f)
+            r.add(label(text, 17f, color = if (p == null) teamColor and 0x99FFFFFF.toInt() else teamColor), top = 0, width = 0, weight = 1f)
             if (st.isHost) {
                 if (p == null) {
-                    r.add(button("+ бот", ButtonStyle.SECONDARY) { Session.send(JSONObject().put("t", "addbot")) }, top = 0, width = dp(110))
+                    r.add(button("+ бот", ButtonStyle.SECONDARY) { Session.send(JSONObject().put("t", "addbot")) }, top = 0, width = dp(92))
                 } else if (i != st.hostSeat) {
                     r.add(button("Убрать", ButtonStyle.SECONDARY) {
                         Session.send(JSONObject().put("t", "remove").put("seat", i))
-                    }, top = 0, width = dp(110))
+                    }, top = 0, width = dp(92))
+                }
+                if (st.players.size > 2) {
+                    r.addView(View(this), LinearLayout.LayoutParams(dp(6), 1))
+                    r.add(button("↓", ButtonStyle.SECONDARY) {
+                        Session.send(JSONObject().put("t", "swap").put("a", i).put("b", (i + 1) % st.players.size))
+                    }.apply { contentDescription = "Пересадить на следующее место" }, top = 0, width = dp(52))
                 }
             }
             c.add(r, top = 8)
         }
+        if (st.isHost && st.players.size > 2) {
+            c.add(label("«↓» — поменять игрока местами со следующим.", 13f, color = Colors.TEXT_DIM), top = 6)
+        }
 
         c.add(label("Правила стола", 18f, bold = true), top = 24)
-        val rules = st.rules
         if (st.isHost) {
             c.add(label("Игра до:", 15f, color = Colors.TEXT_DIM), top = 6)
             val targets = row()
@@ -275,9 +311,11 @@ class MainActivity : Activity(), Session.Listener {
                 if (t != Rules.TARGETS.last()) targets.addView(View(this), LinearLayout.LayoutParams(dp(8), 1))
             }
             c.add(targets, top = 6)
-            c.add(checkbox("Взявший козырь должен набрать больше КАЖДОГО соперника (если выключено — больше половины всех очков)", rules.takerMustBeatEach) {
-                sendRules(rules.copy(takerMustBeatEach = it))
-            }, top = 10)
+            if (rules.players == 3) {
+                c.add(checkbox("Взявший козырь должен набрать больше КАЖДОГО соперника (если выключено — больше половины всех очков)", rules.takerMustBeatEach) {
+                    sendRules(rules.copy(takerMustBeatEach = it))
+                }, top = 10)
+            }
             c.add(checkbox("Нет масти и нельзя перебить козырь — всё равно класть козырь", rules.mustUnderTrump) {
                 sendRules(rules.copy(mustUnderTrump = it))
             }, top = 6)
@@ -289,7 +327,7 @@ class MainActivity : Activity(), Session.Listener {
             val start = button("Начать игру") { Session.send(JSONObject().put("t", "start")) }
             start.isEnabled = st.players.all { it != null }
             c.add(start, top = 24)
-            if (!start.isEnabled) c.add(label("Нужно 3 игрока. Можно добавить бота.", 14f, color = Colors.TEXT_DIM), top = 6)
+            if (!start.isEnabled) c.add(label("Нужно игроков: ${rules.players}. Можно добавить ботов.", 14f, color = Colors.TEXT_DIM), top = 6)
         }
         c.add(button("Выйти", ButtonStyle.SECONDARY) { confirmLeave() }, top = 12)
         setScreen(Screen.LOBBY, c)
@@ -309,9 +347,25 @@ class MainActivity : Activity(), Session.Listener {
         Session.send(JSONObject().put("t", "rules").put("rules", Codec.encodeRules(r)))
     }
 
-    private fun rulesSummary(r: Rules) = listOf(
+    private fun playersLabel(n: Int) = when (n) {
+        2 -> "Двое"
+        3 -> "Трое"
+        else -> "Четверо"
+    }
+
+    private fun tableDescription(n: Int) = when (n) {
+        2 -> "Один на один, 24 карты (от девятки), по 12 карт."
+        3 -> "Каждый сам за себя, 24 карты (от девятки), по 8 карт."
+        else -> "Двое на двое, 32 карты (от семёрки), по 8 карт."
+    }
+
+    private fun rulesSummary(r: Rules) = listOfNotNull(
         "Игра до ${r.target} очков.",
-        if (r.takerMustBeatEach) "Взявший должен набрать больше каждого соперника." else "Взявший должен набрать больше половины очков.",
+        when {
+            r.players != 3 -> "Играющие должны набрать больше соперников."
+            r.takerMustBeatEach -> "Взявший должен набрать больше каждого соперника."
+            else -> "Взявший должен набрать больше половины очков."
+        },
         if (r.mustUnderTrump) "Без масти козырь класть обязательно." else "Без масти, если нельзя перебить козырь, можно класть любую карту.",
     ).joinToString("\n")
 
@@ -319,7 +373,7 @@ class MainActivity : Activity(), Session.Listener {
 
     private fun showRules() {
         val c = column(24)
-        c.add(label("Правила белота на троих", 24f, bold = true), top = 0)
+        c.add(label("Правила белота", 24f, bold = true), top = 0)
         c.add(label(RulesText.TEXT, 15f), top = 12)
         c.add(button("Назад", ButtonStyle.SECONDARY) { showMenu() }, top = 20)
         setScreen(Screen.RULES, c)

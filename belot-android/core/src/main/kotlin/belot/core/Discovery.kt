@@ -8,7 +8,14 @@ import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 
-data class HostInfo(val address: String, val port: Int, val hostName: String, val players: Int, val started: Boolean)
+data class HostInfo(
+    val address: String,
+    val port: Int,
+    val hostName: String,
+    val players: Int,
+    val started: Boolean,
+    val tableSize: Int = 3,
+)
 
 object NetUtil {
     /** IPv4 addresses of this device, excluding loopback. */
@@ -49,7 +56,7 @@ class DiscoveryBeacon(private val server: GameServer, private val udpPort: Int =
                     while (running) {
                         val text = listOf(
                             Protocol.MAGIC, server.port, server.hostName.replace("|", " "),
-                            server.playerCount, if (server.started) 1 else 0,
+                            server.playerCount, if (server.started) 1 else 0, server.tableSize,
                         ).joinToString("|")
                         val data = text.toByteArray(Charsets.UTF_8)
                         for (addr in NetUtil.broadcastAddresses()) {
@@ -104,6 +111,7 @@ class DiscoveryListener(private val onHost: (HostInfo) -> Unit, private val udpP
                             hostName = parts[2],
                             players = parts[3].toIntOrNull() ?: 0,
                             started = parts[4] == "1",
+                            tableSize = parts.getOrNull(5)?.toIntOrNull() ?: 3,
                         )
                     )
                 }

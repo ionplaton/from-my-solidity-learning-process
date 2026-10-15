@@ -15,6 +15,7 @@ object Bot {
                 Rank.TEN -> 1.0
                 Rank.KING -> 0.6
                 Rank.QUEEN -> 0.5
+                Rank.EIGHT, Rank.SEVEN -> 0.3
             }
         }
         if (trumps.size > 2) s += 0.5 * (trumps.size - 2)
@@ -30,15 +31,20 @@ object Bot {
         return s
     }
 
+    private fun threshold(game: BelotGame) = when (game.playerCount) {
+        2 -> 5.2   // more cards are still to come, the bot sees only half of its hand
+        4 -> 4.2   // the partner helps
+        else -> 4.6
+    }
+
     fun chooseBid(game: BelotGame, seat: Int): BidChoice {
         val hand = game.hands[seat]
         val turned = game.turnedCard!!
         return if (game.bidRound == 1) {
-            val s = strength(hand + turned, turned.suit)
-            BidChoice(s >= 4.6, null)
+            BidChoice(strength(hand + turned, turned.suit) >= threshold(game), null)
         } else {
             val best = Suit.entries.filter { it != turned.suit }.maxBy { strength(hand, it) }
-            BidChoice(strength(hand, best) >= 4.6, best)
+            BidChoice(strength(hand, best) >= threshold(game), best)
         }
     }
 
@@ -50,21 +56,30 @@ object Bot {
 
         if (trick.isEmpty()) return lead(game, seat, legal, trump)
 
-        val winningNow = trick[game.trickWinnerIndex()].card
+        val winnerPlay = trick[game.trickWinnerIndex()]
+        val winningNow = winnerPlay.card
+        val last = trick.size == game.playerCount - 1
+        val partnerWins = winnerPlay.player == game.partnerOf(seat)
+
+        if (partnerWins && (last || isMaster(game, winningNow, trump))) {
+            // The trick is ours: add points with a non-trump card, but keep aces that are still masters.
+            val plain = legal.filter { it.suit != trump }
+            if (plain.isNotEmpty()) return plain.maxBy { it.points(trump) * 2 - (if (isMaster(game, it, trump)) 15 else 0) }
+            return cheapest(legal, trump)
+        }
+
         val winners = legal.filter { c ->
             val t = trick + Play(seat, c)
             game.trickWinnerIndex(t) == t.lastIndex
         }
         val trickPoints = trick.sumOf { it.card.points(trump) }
-        val last = trick.size == BelotGame.PLAYERS - 1
 
-        if (winners.isNotEmpty()) {
+        if (winners.isNotEmpty() && !partnerWins) {
             val plainWinners = winners.filter { it.suit != trump }
             if (last) {
                 // Take it as cheaply as possible in trumps, or with the richest plain card.
                 return plainWinners.maxByOrNull { it.points(trump) } ?: winners.minBy { it.rank.trumpOrder }
             }
-            // Second to play: win with a sure card, or trump in when the trick is worth it.
             val sure = plainWinners.filter { isMaster(game, it, trump) }
             if (sure.isNotEmpty()) return sure.maxBy { it.points(trump) }
             if (winningNow.suit != trump && plainWinners.isEmpty() && trickPoints >= 10) {
@@ -77,9 +92,10 @@ object Bot {
 
     private fun lead(game: BelotGame, seat: Int, legal: List<Card>, trump: Suit): Card {
         val hand = game.hands[seat]
-        val outstandingTrumps = Card.deck24().count { it.suit == trump && it !in game.playedCards && it !in hand }
+        val outstandingTrumps = game.deckCards.count { it.suit == trump && it !in game.playedCards && it !in hand }
         val myTrumps = legal.filter { it.suit == trump }
-        if (seat == game.taker && outstandingTrumps > 0 && myTrumps.isNotEmpty()) {
+        val ourSideTook = game.sideOf(seat) == game.sideOf(game.taker)
+        if (ourSideTook && outstandingTrumps > 0 && myTrumps.isNotEmpty()) {
             val master = myTrumps.firstOrNull { isMaster(game, it, trump) }
             if (master != null) return master
         }
@@ -92,7 +108,7 @@ object Bot {
 
     /** Whether no unseen card of the same suit can beat [card]. */
     private fun isMaster(game: BelotGame, card: Card, trump: Suit): Boolean =
-        Card.deck24().none {
+        game.deckCards.none {
             it.suit == card.suit && it.order(trump) > card.order(trump) && it !in game.playedCards
         }
 

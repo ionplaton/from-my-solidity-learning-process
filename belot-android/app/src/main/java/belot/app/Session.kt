@@ -60,7 +60,8 @@ object Session {
     private var client: GameClient? = null
     private var generation = 0
     private var token: String? = null
-    private var autoStartWithBots = false
+    /** Number of players for a practice game against bots, or 0 for a normal table. */
+    private var autoStartWithBots = 0
 
     var listener: Listener? = null
     var state: TableState? = null
@@ -76,11 +77,12 @@ object Session {
     val isActive: Boolean get() = client != null || server != null
     val hostPort: Int get() = server?.port ?: lastPort
 
-    fun host(name: String, withBots: Boolean) {
+    fun host(name: String, botsGame: Int) {
+        val withBots = botsGame > 0
         leave()
         val tok = UUID.randomUUID().toString()
         token = tok
-        autoStartWithBots = withBots
+        autoStartWithBots = botsGame
         val srv = GameServer(tok)
         server = srv
         val gen = generation
@@ -140,9 +142,11 @@ object Session {
                 connected = true
                 val st = TableState.parse(msg)
                 state = st
-                if (autoStartWithBots && st.isHost && st.game == null) {
-                    autoStartWithBots = false
-                    repeat(st.players.count { it == null }) { send(JSONObject().put("t", "addbot")) }
+                val bots = autoStartWithBots
+                if (bots > 0 && st.isHost && st.game == null) {
+                    autoStartWithBots = 0
+                    send(JSONObject().put("t", "rules").put("rules", Codec.encodeRules(st.rules.copy(players = bots))))
+                    repeat(bots - 1) { send(JSONObject().put("t", "addbot")) }
                     send(JSONObject().put("t", "start"))
                 }
                 listener?.onState()
@@ -165,7 +169,7 @@ object Session {
         beacon = null
         state = null
         connected = false
-        autoStartWithBots = false
+        autoStartWithBots = 0
         Thread {
             c?.close()
             b?.stop()

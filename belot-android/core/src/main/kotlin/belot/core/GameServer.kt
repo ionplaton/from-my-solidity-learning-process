@@ -30,7 +30,9 @@ class GameServer(
     private val loop: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "belot-server").apply { isDaemon = true }
     }
-    private val seats = arrayOfNulls<Seat>(BelotGame.PLAYERS)
+    private val seats = arrayOfNulls<Seat>(Protocol.MAX_PLAYERS)
+    private val capacity: Int get() = rules.players
+    private val active: List<Seat?> get() = seats.take(capacity)
     private val conns = mutableListOf<Conn>()
     private var hostSeat = -1
     private var rules = Rules()
@@ -42,13 +44,23 @@ class GameServer(
     var port: Int = preferredPort
         private set
 
-    /** Number of occupied seats, for the discovery beacon. */
+    /** Number of occupied seats and of seats at the table, for the discovery beacon. */
     @Volatile var playerCount: Int = 0
+        private set
+    @Volatile var tableSize: Int = 3
         private set
     @Volatile var hostName: String = ""
         private set
     @Volatile var started: Boolean = false
         private set
+
+    /** Runs [block] on the game thread; silently ignored once the server is stopped. */
+    private fun post(block: () -> Unit) {
+        try {
+            loop.execute(block)
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+        }
+    }
 
     fun start() {
         var ss: ServerSocket? = null
@@ -70,7 +82,7 @@ class GameServer(
                     s.tcpNoDelay = true
                     s.soTimeout = Protocol.READ_TIMEOUT_MS
                     val c = Conn(s)
-                    loop.execute { conns += c }
+                    post { conns += c }
                     c.startReading()
                 } catch (_: Exception) {
                     if (!running) break
@@ -83,7 +95,7 @@ class GameServer(
     fun stop() {
         running = false
         try { serverSocket?.close() } catch (_: Exception) {}
-        loop.execute {
+        post {
             conns.toList().forEach { it.close() }
             loop.shutdown()
         }
@@ -103,11 +115,11 @@ class GameServer(
                         val line = reader.readLine() ?: break
                         if (line.isBlank()) continue
                         val msg = try { JSONObject(line) } catch (_: Exception) { continue }
-                        loop.execute { handle(this, msg) }
+                        post { handle(this, msg) }
                     }
                 } catch (_: Exception) {
                 }
-                loop.execute { onDisconnect(this) }
+                post { onDisconnect(this) }
             }, "belot-in").apply { isDaemon = true }.start()
         }
 
@@ -170,11 +182,11 @@ class GameServer(
         val wantsHost = msg.optString("token") == hostToken
         val g = game
         val seatIndex: Int? = if (g == null) {
-            seats.indices.firstOrNull { seats[it] == null }
+            (0 until capacity).firstOrNull { seats[it] == null }
         } else {
             // Rejoin: prefer a disconnected seat with the same name, then any disconnected human seat.
-            seats.indices.firstOrNull { seats[it]?.let { s -> !s.bot && s.conn == null && s.name == name } == true }
-                ?: seats.indices.firstOrNull { seats[it]?.let { s -> !s.bot && s.conn == null } == true }
+            (0 until capacity).firstOrNull { seats[it]?.let { s -> !s.bot && s.conn == null && s.name == name } == true }
+                ?: (0 until capacity).firstOrNull { seats[it]?.let { s -> !s.bot && s.conn == null } == true }
         }
         if (seatIndex == null) {
             c.send(JSONObject().put("t", "closed").put("msg", if (g == null) "Стол уже заполнен" else "Игра уже идёт"))
@@ -209,7 +221,7 @@ class GameServer(
         when (msg.optString("t")) {
             "addbot" -> {
                 check(isHost(c) && g == null) { "Только создатель стола может добавить бота" }
-                val free = seats.indices.firstOrNull { seats[it] == null } ?: error("Мест нет")
+                val free = (0 until capacity).firstOrNull { seats[it] == null } ?: error("Мест нет")
                 var n = 1
                 while (seats.any { it?.name == "Бот $n" }) n++
                 seats[free] = Seat("Бот $n", true, null)
@@ -217,7 +229,7 @@ class GameServer(
             "remove" -> {
                 check(isHost(c) && g == null) { "Только создатель стола может убрать игрока" }
                 val i = msg.getInt("seat")
-                require(i != hostSeat && i in seats.indices) { "Нельзя" }
+                require(i != hostSeat && i in 0 until capacity) { "Нельзя" }
                 seats[i]?.conn?.let {
                     it.send(JSONObject().put("t", "closed").put("msg", "Вас убрали со стола"))
                     it.close()
@@ -227,18 +239,40 @@ class GameServer(
             }
             "rules" -> {
                 check(isHost(c) && g == null) { "Правила меняет создатель стола" }
-                rules = Codec.decodeRules(msg.getJSONObject("rules"))
+                val r = Codec.decodeRules(msg.getJSONObject("rules"))
+                val dropped = (r.players until Protocol.MAX_PLAYERS).filter { seats[it] != null }
+                check(dropped.none { seats[it]!!.conn != null || it == hostSeat }) {
+                    "Сначала уберите или пересадите игроков с лишних мест"
+                }
+                dropped.forEach { seats[it] = null }
+                rules = r
+            }
+            "swap" -> {
+                check(isHost(c) && g == null) { "Пересаживает создатель стола" }
+                val a = msg.getInt("a")
+                val b = msg.getInt("b")
+                require(a in 0 until capacity && b in 0 until capacity && a != b) { "Нельзя" }
+                val sa = seats[a]
+                seats[a] = seats[b]
+                seats[b] = sa
+                seats[a]?.conn?.seat = a
+                seats[b]?.conn?.seat = b
+                hostSeat = when (hostSeat) {
+                    a -> b
+                    b -> a
+                    else -> hostSeat
+                }
             }
             "start" -> {
                 check(isHost(c) && g == null) { "Игру начинает создатель стола" }
-                check(seats.all { it != null }) { "Нужно три игрока" }
-                game = BelotGame(seats.map { it!!.name }, rules)
+                check(active.all { it != null }) { "Нужно игроков: $capacity" }
+                game = BelotGame(active.map { it!!.name }, rules)
                 started = true
             }
             "tobot" -> {
                 check(isHost(c)) { "Только создатель стола" }
                 val i = msg.getInt("seat")
-                val s = seats.getOrNull(i) ?: error("Нет такого места")
+                val s = (if (i in 0 until capacity) seats[i] else null) ?: error("Нет такого места")
                 check(s.conn == null && !s.bot) { "Игрок на связи" }
                 s.bot = true
                 s.name = s.name + " (бот)"
@@ -282,13 +316,14 @@ class GameServer(
     private fun changed() {
         val g = game
         if (g != null && g.phase == Phase.HAND_OVER) {
-            seats.forEach { if (it!!.bot) it.ready = true }
-            if (seats.all { it!!.ready }) {
-                seats.forEach { it!!.ready = false }
+            active.forEach { if (it!!.bot) it.ready = true }
+            if (active.all { it!!.ready }) {
+                active.forEach { it!!.ready = false }
                 g.nextHand()
             }
         }
-        playerCount = seats.count { it != null }
+        playerCount = active.count { it != null }
+        tableSize = capacity
         broadcast()
         scheduleBot()
     }
@@ -319,7 +354,7 @@ class GameServer(
 
     private fun broadcast() {
         val players = JSONArray()
-        seats.forEach { s ->
+        active.forEach { s ->
             players.put(
                 if (s == null) JSONObject.NULL
                 else JSONObject().put("name", s.name).put("bot", s.bot).put("online", s.bot || s.conn != null)
@@ -346,4 +381,5 @@ object Protocol {
     const val UDP_PORT = 47322
     const val READ_TIMEOUT_MS = 20_000
     const val MAGIC = "BELOT3"
+    const val MAX_PLAYERS = 4
 }
