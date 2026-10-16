@@ -1,0 +1,36 @@
+[
+ {
+  "id": "ord-001",
+  "artist": "Example Artist",
+  "track": "Example Song",
+  "start": "2026-10-20",
+  "days": 14,
+  "videos": 50,
+  "platforms": [
+   "tiktok",
+   "instagram",
+   "youtube"
+  ],
+  "sounds": {
+   "tiktok": "https://www.tiktok.com/music/example-123",
+   "instagram": "https://www.instagram.com/reels/audio/123",
+   "youtube": "https://www.youtube.com/source/abc/shorts"
+  }
+ },
+ {
+  "id": "ord-002",
+  "artist": "Another Artist",
+  "track": "Another Song",
+  "start": "2026-10-20",
+  "days": 7,
+  "videos": 20,
+  "platforms": [
+   "tiktok",
+   "instagram"
+  ],
+  "sounds": {
+   "tiktok": "https://www.tiktok.com/music/another-456",
+   "instagram": "https://www.instagram.com/reels/audio/456"
+  }
+ }
+]

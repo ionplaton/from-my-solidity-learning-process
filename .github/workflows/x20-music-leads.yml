@@ -1,0 +1,54 @@
+name: x20-music daily leads
+
+on:
+  schedule:
+    - cron: "17 13 * * *"   # every day ~9:17 New York time
+  workflow_dispatch:
+  push:
+    paths: ["x20-music/**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: x20-music
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests -v
+
+  leads:
+    needs: test
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: x20-music
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Remembers artists already surfaced so the same lead does not repeat every day.
+      - uses: actions/cache@v4
+        with:
+          path: x20-music/state
+          key: x20-music-seen-${{ github.run_id }}
+          restore-keys: x20-music-seen-
+      - name: Find leads
+        env:
+          MB_CONTACT: ${{ secrets.MB_CONTACT }}
+        run: |
+          mkdir -p state out
+          python -m x20music leads --days 3 --fetch-emails \
+            --state state/seen.sqlite --out out \
+            --manual config/manual_leads.csv \
+            --settings config/settings.example.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x20-music-leads-${{ github.run_number }}
+          path: x20-music/out/
+          retention-days: 30

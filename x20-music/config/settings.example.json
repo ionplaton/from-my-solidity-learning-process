@@ -1,0 +1,28 @@
+{
+ "sender": {
+  "sender_name": "<your name>",
+  "company": "X20 Music",
+  "reply_email": "<reply email>",
+  "postal_address": "<US postal address required by CAN-SPAM>"
+ },
+ "packages": [
+  {
+   "name": "Test",
+   "videos": 20,
+   "days": 7,
+   "price_usd": 149
+  },
+  {
+   "name": "Release",
+   "videos": 50,
+   "days": 14,
+   "price_usd": 349
+  },
+  {
+   "name": "Push",
+   "videos": 150,
+   "days": 21,
+   "price_usd": 899
+  }
+ ]
+}
