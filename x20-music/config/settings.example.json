@@ -24,5 +24,40 @@
    "days": 21,
    "price_usd": 899
   }
- ]
+ ],
+ "mailboxes": [
+  {
+   "name": "mb1",
+   "address": "alex@outreach-domain-1.example",
+   "display_name": "Alex from X20 Music",
+   "smtp_host": "smtp.gmail.com",
+   "smtp_port": 465,
+   "imap_host": "imap.gmail.com",
+   "imap_port": 993,
+   "password_env": "MB1_PASSWORD",
+   "start_date": "2026-11-03",
+   "ramp_start": 10,
+   "ramp_step": 3,
+   "daily_max": 40
+  },
+  {
+   "name": "mb2",
+   "address": "sam@outreach-domain-2.example",
+   "display_name": "Sam from X20 Music",
+   "smtp_host": "smtp.gmail.com",
+   "smtp_port": 465,
+   "imap_host": "imap.gmail.com",
+   "imap_port": 993,
+   "password_env": "MB2_PASSWORD",
+   "start_date": "2026-11-03",
+   "ramp_start": 10,
+   "ramp_step": 3,
+   "daily_max": 40
+  }
+ ],
+ "send_delay_seconds": [
+  25,
+  70
+ ],
+ "dm_per_day": 40
 }

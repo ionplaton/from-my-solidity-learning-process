@@ -27,15 +27,16 @@ def build_release_query(start, end, types=("single", "ep")):
 def parse_release(rel):
     credit = (rel.get("artist-credit") or [{}])[0]
     artist = credit.get("artist") or {}
-    labels = [li.get("label", {}).get("name") for li in rel.get("label-info") or []]
-    labels = [name for name in labels if name]
+    labels = [li.get("label") or {} for li in rel.get("label-info") or []]
+    labels = [lab for lab in labels if lab.get("name")]
     return {
         "release_id": rel.get("id"),
         "title": rel.get("title"),
         "date": rel.get("date"),
         "country": rel.get("country"),
         "type": (rel.get("release-group") or {}).get("primary-type"),
-        "label": labels[0] if labels else "",
+        "label": labels[0]["name"] if labels else "",
+        "label_id": labels[0].get("id", "") if labels else "",
         "artist_id": artist.get("id"),
         "artist_name": artist.get("name") or credit.get("name"),
     }
@@ -78,10 +79,9 @@ def classify_url(url):
     return None
 
 
-def artist_profile(get_json, mbid):
-    data = get_json(f"{MB}/artist/{mbid}", {"inc": "url-rels", "fmt": "json"})
+def _links(relations):
     links = {}
-    for rel in data.get("relations") or []:
+    for rel in relations or []:
         url = (rel.get("url") or {}).get("resource")
         if not url:
             continue
@@ -90,8 +90,22 @@ def artist_profile(get_json, mbid):
             kind = "homepage"
         if kind and kind not in links:
             links[kind] = url
+    return links
+
+
+def artist_profile(get_json, mbid):
+    data = get_json(f"{MB}/artist/{mbid}", {"inc": "url-rels", "fmt": "json"})
     return {
         "country": data.get("country") or "",
         "type": data.get("type") or "",
-        "links": links,
+        "links": _links(data.get("relations")),
+    }
+
+
+def label_profile(get_json, mbid):
+    data = get_json(f"{MB}/label/{mbid}", {"inc": "url-rels", "fmt": "json"})
+    return {
+        "country": data.get("country") or "",
+        "type": data.get("type") or "",
+        "links": _links(data.get("relations")),
     }

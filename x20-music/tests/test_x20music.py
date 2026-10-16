@@ -10,7 +10,7 @@ HERE = os.path.dirname(__file__)
 CONFIG = os.path.join(HERE, "..", "config")
 
 RELEASES = {
-    "count": 3,
+    "count": 4,
     "releases": [
         {"id": "r1", "title": "Night Drive", "date": "2026-10-15", "country": "XW",
          "release-group": {"primary-type": "Single"},
@@ -19,11 +19,15 @@ RELEASES = {
         {"id": "r2", "title": "Big Hit", "date": "2026-10-14", "country": "US",
          "release-group": {"primary-type": "Single"},
          "artist-credit": [{"name": "Pop Star", "artist": {"id": "a2", "name": "Pop Star"}}],
-         "label-info": [{"label": {"name": "Interscope Records"}}]},
+         "label-info": [{"label": {"id": "l-major", "name": "Interscope Records"}}]},
         {"id": "r3", "title": "Older", "date": "2026-10-13", "country": "XW",
          "release-group": {"primary-type": "EP"},
          "artist-credit": [{"name": "Indie Kid", "artist": {"id": "a1", "name": "Indie Kid"}}],
          "label-info": []},
+        {"id": "r4", "title": "Label Song", "date": "2026-10-12", "country": "US",
+         "release-group": {"primary-type": "Single"},
+         "artist-credit": [{"name": "Band X", "artist": {"id": "a3", "name": "Band X"}}],
+         "label-info": [{"label": {"id": "l1", "name": "Tiny Records"}}]},
     ],
 }
 
@@ -39,25 +43,45 @@ ARTIST = {
 
 DEEZER = {"data": [{"name": "Indie Kid", "nb_fan": 4200}]}
 
+LABEL = {"id": "l1", "country": "US", "type": "Original Production",
+         "relations": [{"type": "official homepage", "url": {"resource": "https://tinyrecords.com"}}]}
+
+# Band X has no links at all -> dropped as unreachable.
+BAND_X = {"id": "a3", "country": "GB", "type": "Group", "relations": []}
+
 
 def fake_get_json(url, params=None):
     if url.endswith("/release"):
         return RELEASES
-    if "/artist/" in url:
+    if url.endswith("/artist/a1"):
         return ARTIST
+    if url.endswith("/artist/a3"):
+        return BAND_X
+    if url.endswith("/label/l1"):
+        return LABEL
     if "deezer" in url:
         return DEEZER
     raise AssertionError(url)
 
 
+PAGES = {
+    "https://indiekid.com": '<a href="mailto:booking@indiekid.com">Booking</a> <img src="logo@2x.png">',
+    # Label homepage has no email, but links to a contact page that does (HTML-escaped).
+    "https://tinyrecords.com": '<a href="/about">About</a> <a href="https://other.com/contact">x</a>',
+    "https://tinyrecords.com/about": "demos: demos&#64;tinyrecords.com, info@tinyrecords.com",
+}
+
+
 def fake_get_text(url):
-    return '<a href="mailto:booking@indiekid.com">Booking</a> <img src="logo@2x.png">'
+    if url not in PAGES:
+        raise OSError(url)
+    return PAGES[url]
 
 
 class LeadTests(unittest.TestCase):
     def test_collect_filters_majors_dedupes_and_scores(self):
         found = leads.collect(fake_get_json, date(2026, 10, 16), get_text=fake_get_text, log=lambda m: None)
-        self.assertEqual([l.artist_name for l in found], ["Indie Kid"])
+        self.assertEqual([l.artist_name for l in found], ["Indie Kid", "Tiny Records"])
         lead = found[0]
         self.assertEqual(lead.release_title, "Night Drive")  # newest release wins
         self.assertEqual(lead.email, "booking@indiekid.com")
@@ -71,7 +95,7 @@ class LeadTests(unittest.TestCase):
             seen = leads.SeenStore(os.path.join(d, "s.sqlite"))
             first = leads.collect(fake_get_json, date(2026, 10, 16), seen=seen, log=lambda m: None)
             again = leads.collect(fake_get_json, date(2026, 10, 17), seen=seen, log=lambda m: None)
-            self.assertEqual(len(first), 1)
+            self.assertEqual(len(first), 2)
             self.assertEqual(again, [])
 
     def test_manual_leads_rank_first(self):

@@ -5,3 +5,6 @@ plan.csv
 # real account handles and client orders stay local
 config/accounts.json
 config/orders.json
+config/settings.json
+config/manual_leads.csv
+deploy/.env
